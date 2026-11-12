@@ -42,7 +42,7 @@ jobs:
 
       - name: Run cppcheck
         run: |
-          cppcheck src/*.c --enable=warning --error-exitcode=1 --force -I src -I include -I src/littlefs -DLFS_CONFIG=lfs_config.h -DLFS_MALLOC=malloc -DLFS_FREE=free -DLFS_ASSERT=assert -DLFS_DEBUG= -DLFS_WARN= -DLFS_ERROR= -DLFS_TRACE= -DLFS_NO_MALLOC -DLFS_NO_ASSERT
+          cppcheck src/*.c --enable=warning --error-exitcode=1 --force -I src -I include -I src/littlefs -DLFS_CONFIG=lfs_config.h -DLFS_MALLOC=malloc -DLFS_FREE=free -DLFS_ASSERT=assert -DLFS_DEBUG= -DLFS_WARN= -DLFS_ERROR= -DLFS_TRACE= -DLFS_NO_MALLOC -DLFS_NO_ASSERT -DESP_IDF_VERSION=60000 -DESP_IDF_VERSION_VAL\(a,b,c\)='((a)*10000+(b)*100+c)'
 
       - name: esp-idf build library
         uses: espressif/esp-idf-ci-action@main
