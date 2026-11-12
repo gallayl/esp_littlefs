@@ -2675,15 +2675,19 @@ static int vfs_littlefs_rmdir(void* ctx, const char* name) {
 static ssize_t vfs_littlefs_truncate( void *ctx, const char *path, off_t size )
 {
     esp_littlefs_t * efs = (esp_littlefs_t *)ctx;
-    ssize_t res = -1;
+    ssize_t res;
     vfs_littlefs_file_t *file = NULL;
 
     int fd = vfs_littlefs_open( ctx, path, LFS_O_RDWR, 438 );
+    if (fd < 0) {
+        return -1;
+    }
 
     sem_take(efs);
-    if((uint32_t)fd > efs->cache_size)
+    if((uint32_t)fd >= efs->cache_size || efs->cache[fd] == NULL)
     {
         sem_give(efs);
+        vfs_littlefs_close( ctx, fd );
         ESP_LOGE(ESP_LITTLEFS_TAG, "FD %d must be <%d.", fd, efs->cache_size);
         errno = EBADF;
         return -1;
@@ -2702,13 +2706,14 @@ static ssize_t vfs_littlefs_truncate( void *ctx, const char *path, off_t size )
         ESP_LOGV(ESP_LITTLEFS_TAG, "Failed to truncate FD %d. Error %s (%d)",
                 fd, esp_littlefs_errno(res), res);
 #endif
-        res = -1;
+        vfs_littlefs_close( ctx, fd );
+        return -1;
     }
-    else
-    {
-        ESP_LOGV( ESP_LITTLEFS_TAG, "Truncated file %s to %u bytes", path, (unsigned int) size );
+
+    ESP_LOGV( ESP_LITTLEFS_TAG, "Truncated file %s to %u bytes", path, (unsigned int) size );
+    if (vfs_littlefs_close( ctx, fd ) < 0) {
+        return -1;
     }
-    vfs_littlefs_close( ctx, fd );
     return res;
 }
 

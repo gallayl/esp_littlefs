@@ -103,6 +103,22 @@ TEST_CASE("filesystem operations after creating tasks should not deadlock", "[li
         fprintf(f, "data%d", i);
         TEST_ASSERT_EQUAL(0, fclose(f));
     }
+
+    /* Truncate paths must not deadlock with non-recursive fs locks */
+    {
+        const char* trunc_name = littlefs_base_path "/trunc.txt";
+        FILE* tf = fopen(trunc_name, "w");
+        TEST_ASSERT_NOT_NULL(tf);
+        TEST_ASSERT_TRUE(fputs("0123456789", tf) != EOF);
+        TEST_ASSERT_EQUAL(0, fclose(tf));
+
+        TEST_ASSERT_EQUAL(0, truncate(trunc_name, 4));
+
+        int tfd = open(trunc_name, O_RDWR);
+        TEST_ASSERT_GREATER_OR_EQUAL(0, tfd);
+        TEST_ASSERT_EQUAL(0, ftruncate(tfd, 2));
+        TEST_ASSERT_EQUAL(0, close(tfd));
+    }
     
     test_teardown();
 }
