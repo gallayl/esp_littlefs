@@ -42,9 +42,6 @@ TEST_CASE("can format mounted partition", "[littlefs]")
     test_teardown();
 }
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
 static void dummy_task(void *arg)
 {
     (void)arg;
