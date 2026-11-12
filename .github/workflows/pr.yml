@@ -46,7 +46,10 @@ jobs:
             --suppress=missingIncludeSystem \
             -D__CPPCHECK__ \
             -D'ESP_IDF_VERSION_VAL(major,minor,patch)=((major<<16)|(minor<<8)|(patch))' \
-            -DESP_IDF_VERSION=0x060000
+            -DESP_IDF_VERSION=0x060000 \
+            -D'LFS_CRC(crc,buffer,size)=(crc)' \
+            -D'LFS_MALLOC(size)=malloc(size)' \
+            -D'LFS_FREE(p)=free(p)'
 
       - name: esp-idf build library
         uses: espressif/esp-idf-ci-action@main
