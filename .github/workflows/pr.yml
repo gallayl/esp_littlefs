@@ -42,7 +42,7 @@ jobs:
 
       - name: Run cppcheck
         run: |
-          cppcheck --project=.cppcheck --enable=warning --error-exitcode=1 --force
+          cppcheck src/*.c --enable=warning --error-exitcode=1 --force
 
       - name: esp-idf build library
         uses: espressif/esp-idf-ci-action@main
