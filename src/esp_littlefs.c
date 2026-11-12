@@ -123,7 +123,6 @@ static esp_err_t esp_littlefs_by_partition(const esp_partition_t* part, int*inde
 #if ESP_LITTLEFS_HAS_BLOCKDEV
 static esp_err_t esp_littlefs_by_blockdev(esp_blockdev_handle_t blockdev, int * index);
 #endif
-static int esp_littlefs_file_sync(esp_littlefs_t *efs, vfs_littlefs_file_t *file);
 
 #ifdef CONFIG_LITTLEFS_SDMMC_SUPPORT
 static esp_err_t esp_littlefs_by_sdmmc_handle(sdmmc_card_t *handle, int *index);
@@ -2768,14 +2767,6 @@ static int esp_littlefs_file_sync_locked(esp_littlefs_t *efs, vfs_littlefs_file_
     }
 #endif
     res = lfs_file_sync(efs->fs, &file->file);
-    return res;
-}
-
-static int esp_littlefs_file_sync(esp_littlefs_t *efs, vfs_littlefs_file_t *file)
-{
-    sem_take(efs);
-    int res = esp_littlefs_file_sync_locked(efs, file);
-    sem_give(efs);
     return res;
 }
 
