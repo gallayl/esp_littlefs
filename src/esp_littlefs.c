@@ -1314,6 +1314,9 @@ static esp_err_t esp_littlefs_init_blockdev(esp_littlefs_t** efs, esp_blockdev_h
 #endif
     }
 
+    /* Non-recursive: prevents self-deadlock from re-entering VFS ops while held.
+     * shortcut: if a task is deleted while holding this lock, the mutex stays locked
+     * and later filesystem calls on this mount will hang, redesign if tasks can be killed mid-I/O. */
     (*efs)->lock = xSemaphoreCreateMutex();
     if ((*efs)->lock == NULL) {
         ESP_LOGE(ESP_LITTLEFS_TAG, "mutex lock could not be created");
@@ -1383,6 +1386,9 @@ static esp_err_t esp_littlefs_init_efs(esp_littlefs_t** efs, const esp_partition
 #endif
     }
 
+    /* Non-recursive: prevents self-deadlock from re-entering VFS ops while held.
+     * shortcut: if a task is deleted while holding this lock, the mutex stays locked
+     * and later filesystem calls on this mount will hang, redesign if tasks can be killed mid-I/O. */
     (*efs)->lock = xSemaphoreCreateMutex();
     if ((*efs)->lock == NULL) {
         ESP_LOGE(ESP_LITTLEFS_TAG, "mutex lock could not be created");
