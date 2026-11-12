@@ -158,6 +158,7 @@ static int vfs_littlefs_fcntl(void* ctx, int fd, int cmd, int arg);
 
 static int sem_take(esp_littlefs_t *efs);
 static int sem_give(esp_littlefs_t *efs);
+static int esp_littlefs_file_sync_locked(esp_littlefs_t *efs, vfs_littlefs_file_t *file);
 static esp_err_t format_from_efs(esp_littlefs_t *efs);
 static void get_total_and_used_bytes(esp_littlefs_t *efs, size_t *total_bytes, size_t *used_bytes);
 
@@ -1314,7 +1315,7 @@ static esp_err_t esp_littlefs_init_blockdev(esp_littlefs_t** efs, esp_blockdev_h
 #endif
     }
 
-    (*efs)->lock = xSemaphoreCreateRecursiveMutex();
+    (*efs)->lock = xSemaphoreCreateMutex();
     if ((*efs)->lock == NULL) {
         ESP_LOGE(ESP_LITTLEFS_TAG, "mutex lock could not be created");
         return ESP_ERR_NO_MEM;
@@ -1383,7 +1384,7 @@ static esp_err_t esp_littlefs_init_efs(esp_littlefs_t** efs, const esp_partition
 #endif
     }
 
-    (*efs)->lock = xSemaphoreCreateRecursiveMutex();
+    (*efs)->lock = xSemaphoreCreateMutex();
     if ((*efs)->lock == NULL) {
         ESP_LOGE(ESP_LITTLEFS_TAG, "mutex lock could not be created");
         return ESP_ERR_NO_MEM;
@@ -1594,7 +1595,7 @@ static inline int sem_take(esp_littlefs_t *efs) {
 #if LOG_LOCAL_LEVEL >= 5
     ESP_LOGV(ESP_LITTLEFS_TAG, "------------------------ Sem Taking [%s]", pcTaskGetName(NULL));
 #endif
-    res = xSemaphoreTakeRecursive(efs->lock, portMAX_DELAY);
+    res = xSemaphoreTake(efs->lock, portMAX_DELAY);
 #if LOG_LOCAL_LEVEL >= 5
     ESP_LOGV(ESP_LITTLEFS_TAG, "--------------------->>> Sem Taken [%s]", pcTaskGetName(NULL));
 #endif
@@ -1609,7 +1610,7 @@ static inline int sem_give(esp_littlefs_t *efs) {
 #if LOG_LOCAL_LEVEL >= 5
     ESP_LOGV(ESP_LITTLEFS_TAG, "---------------------<<< Sem Give [%s]", pcTaskGetName(NULL));
 #endif
-    return xSemaphoreGiveRecursive(efs->lock);
+    return xSemaphoreGive(efs->lock);
 }
 
 
@@ -1942,7 +1943,7 @@ static int vfs_littlefs_open(void* ctx, const char * path, int flags, int mode) 
 #endif
     if(!efs->read_only && lfs_flags != LFS_O_RDONLY)
     {
-        res = esp_littlefs_file_sync(efs, file);
+        res = esp_littlefs_file_sync_locked(efs, file);
     }
     if(res < 0){
         errno = lfs_errno_remap(res);
@@ -1984,7 +1985,9 @@ static ssize_t vfs_littlefs_write(void* ctx, int fd, const void * data, size_t s
     res = lfs_file_write(efs->fs, &file->file, data, size);
 #ifdef CONFIG_LITTLEFS_FLUSH_FILE_EVERY_WRITE
     if(res > 0) {
-        vfs_littlefs_fsync(ctx, fd);
+        if (file) {
+            esp_littlefs_file_sync_locked(efs, file);
+        }
     }
 #endif
     sem_give(efs);
@@ -2055,13 +2058,17 @@ static ssize_t vfs_littlefs_pwrite(void *ctx, int fd, const void *src, size_t si
     if (old_offset < (off_t)0)
     {
         res = old_offset;
+        sem_give(efs);
         goto exit;
     }
 
     /* Set to wanted position.  */
     res = lfs_file_seek(efs->fs, &file->file, offset, SEEK_SET);
     if (res < (off_t)0)
+    {
+        sem_give(efs);
         goto exit;
+    }
 
     /* Write out the data.  */
     res = lfs_file_write(efs->fs, &file->file, src, size);
@@ -2113,13 +2120,17 @@ static ssize_t vfs_littlefs_pread(void *ctx, int fd, void *dst, size_t size, off
     if (old_offset < (off_t)0)
     {
         res = old_offset;
+        sem_give(efs);
         goto exit;
     }
 
     /* Set to wanted position.  */
     res = lfs_file_seek(efs->fs, &file->file, offset, SEEK_SET);
     if (res < (off_t)0)
+    {
+        sem_give(efs);
         goto exit;
+    }
 
     /* Read the data.  */
     res = lfs_file_read(efs->fs, &file->file, dst, size);
@@ -2254,7 +2265,7 @@ static int vfs_littlefs_fsync(void* ctx, int fd)
         return -1;
     }
     file = efs->cache[fd];
-    res = esp_littlefs_file_sync(efs, file);
+    res = esp_littlefs_file_sync_locked(efs, file);
     sem_give(efs);
 
     if(res < 0){
@@ -2748,7 +2759,7 @@ static int vfs_littlefs_ftruncate(void *ctx, int fd, off_t size)
 /**
  * Syncs file while also updating mtime (if necessary)
  */
-static int esp_littlefs_file_sync(esp_littlefs_t *efs, vfs_littlefs_file_t *file)
+static int esp_littlefs_file_sync_locked(esp_littlefs_t *efs, vfs_littlefs_file_t *file)
 {
     int res;
 #if CONFIG_LITTLEFS_USE_MTIME
@@ -2757,6 +2768,14 @@ static int esp_littlefs_file_sync(esp_littlefs_t *efs, vfs_littlefs_file_t *file
     }
 #endif
     res = lfs_file_sync(efs->fs, &file->file);
+    return res;
+}
+
+static int esp_littlefs_file_sync(esp_littlefs_t *efs, vfs_littlefs_file_t *file)
+{
+    sem_take(efs);
+    int res = esp_littlefs_file_sync_locked(efs, file);
+    sem_give(efs);
     return res;
 }
 

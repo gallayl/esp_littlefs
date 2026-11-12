@@ -1,5 +1,9 @@
 //#define LOG_LOCAL_LEVEL 4
 #include "test_littlefs_common.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <unistd.h>
+#include <fcntl.h>
 
 static void test_littlefs_write_file_with_offset(const char *filename);
 static void test_littlefs_read_file_with_offset(const char *filename);
@@ -35,6 +39,71 @@ TEST_CASE("can format mounted partition", "[littlefs]")
     esp_littlefs_format(part->label);
     FILE* f = fopen(filename, "r");
     TEST_ASSERT_NULL(f);
+    test_teardown();
+}
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+static void dummy_task(void *arg)
+{
+    (void)arg;
+    /* Do some filesystem operations in the task */
+    FILE* f = fopen(littlefs_base_path "/taskfile.txt", "w");
+    if (f) {
+        fwrite("hello", 1, 5, f);
+        fflush(f);
+        fclose(f);
+    }
+    int fd = open(littlefs_base_path "/taskfile2.txt", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd >= 0) {
+        write(fd, "world", 5);
+        close(fd);
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+    vTaskDelete(NULL);
+}
+
+TEST_CASE("filesystem operations after creating tasks should not deadlock", "[littlefs][regression]")
+{
+    test_setup();
+    
+    /* Do some operations before creating tasks */
+    const char* filename1 = littlefs_base_path "/before.txt";
+    FILE* f = fopen(filename1, "w");
+    TEST_ASSERT_NOT_NULL(f);
+    TEST_ASSERT_EQUAL(12, fwrite("Hello World\n", 1, 12, f));
+    TEST_ASSERT_EQUAL(0, fclose(f));
+    
+    /* Create tasks similar to what shell does */
+    TaskHandle_t task1, task2;
+    xTaskCreate(dummy_task, "task1", 4096, NULL, 5, &task1);
+    xTaskCreate(dummy_task, "task2", 4096, NULL, 4, &task2);
+    vTaskDelay(pdMS_TO_TICKS(300));
+    
+    /* Try to do filesystem operations after tasks are created - this should not hang */
+    const char* filename2 = littlefs_base_path "/after.txt";
+    f = fopen(filename2, "w");
+    TEST_ASSERT_NOT_NULL(f);
+    TEST_ASSERT_EQUAL(5, fwrite("test\n", 1, 5, f));
+    TEST_ASSERT_EQUAL(0, fclose(f));
+    
+    /* Also test with POSIX style operations */
+    int fd = open(littlefs_base_path "/posix.txt", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    TEST_ASSERT_GREATER_OR_EQUAL(0, fd);
+    TEST_ASSERT_EQUAL(4, write(fd, "data", 4));
+    TEST_ASSERT_EQUAL(0, close(fd));
+    
+    /* Repeat multiple times to catch intermittent issues */
+    for (int i = 0; i < 5; i++) {
+        char name[64];
+        snprintf(name, sizeof(name), littlefs_base_path "/repeat%d.txt", i);
+        f = fopen(name, "w");
+        TEST_ASSERT_NOT_NULL(f);
+        fprintf(f, "data%d", i);
+        TEST_ASSERT_EQUAL(0, fclose(f));
+    }
+    
     test_teardown();
 }
 
