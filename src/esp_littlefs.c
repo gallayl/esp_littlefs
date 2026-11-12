@@ -1984,8 +1984,9 @@ static ssize_t vfs_littlefs_write(void* ctx, int fd, const void * data, size_t s
     res = lfs_file_write(efs->fs, &file->file, data, size);
 #ifdef CONFIG_LITTLEFS_FLUSH_FILE_EVERY_WRITE
     if(res > 0) {
-        if (file) {
-            esp_littlefs_file_sync_locked(efs, file);
+        int sync_res = esp_littlefs_file_sync_locked(efs, file);
+        if (sync_res < 0) {
+            res = sync_res;
         }
     }
 #endif
