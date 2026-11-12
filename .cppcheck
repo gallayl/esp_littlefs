@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="1">
+  <includedir>
+    <dir name="src/"/>
+    <dir name="include/"/>
+    <dir name="src/littlefs/"/>
+  </includedir>
+  <defines>
+    <define name="LFS_CONFIG" value="lfs_config.h"/>
+    <define name="LFS_MALLOC" value="malloc"/>
+    <define name="LFS_FREE" value="free"/>
+    <define name="LFS_ASSERT" value="assert"/>
+    <define name="LFS_DEBUG" value=""/>
+    <define name="LFS_WARN" value=""/>
+    <define name="LFS_ERROR" value=""/>
+    <define name="LFS_TRACE" value=""/>
+    <define name="LFS_NO_MALLOC" value="1"/>
+    <define name="LFS_NO_ASSERT" value="1"/>
+    <define name="ESP_IDF_VERSION_VAL(a,b,c)" value="((a)*10000+(b)*100+(c))"/>
+    <define name="ESP_IDF_VERSION" value="60000"/>
+  </defines>
+</project>
