@@ -1,5 +1,9 @@
 //#define LOG_LOCAL_LEVEL 4
 #include "test_littlefs_common.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <unistd.h>
+#include <fcntl.h>
 
 static void test_littlefs_write_file_with_offset(const char *filename);
 static void test_littlefs_read_file_with_offset(const char *filename);
@@ -35,6 +39,101 @@ TEST_CASE("can format mounted partition", "[littlefs]")
     esp_littlefs_format(part->label);
     FILE* f = fopen(filename, "r");
     TEST_ASSERT_NULL(f);
+    test_teardown();
+}
+
+typedef struct {
+    int id;
+    volatile int *done_count;
+} deadlock_regression_task_arg_t;
+
+static void dummy_task(void *arg)
+{
+    deadlock_regression_task_arg_t *targ = (deadlock_regression_task_arg_t *)arg;
+    char name[64];
+
+    /* Do filesystem operations on task-private files (no shared paths). */
+    snprintf(name, sizeof(name), littlefs_base_path "/task%d_stdio.txt", targ->id);
+    FILE *f = fopen(name, "w");
+    if (f) {
+        fprintf(f, "hello%d", targ->id);
+        fflush(f);
+        fclose(f);
+    }
+
+    snprintf(name, sizeof(name), littlefs_base_path "/task%d_posix.txt", targ->id);
+    int fd = open(name, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd >= 0) {
+        write(fd, "world", 5);
+        close(fd);
+    }
+
+    __atomic_fetch_add(targ->done_count, 1, __ATOMIC_SEQ_CST);
+    vTaskDelete(NULL);
+}
+
+TEST_CASE("filesystem operations after creating tasks should not deadlock", "[littlefs][regression]")
+{
+    test_setup();
+
+    /* Do some operations before creating tasks */
+    const char *filename1 = littlefs_base_path "/before.txt";
+    FILE *f = fopen(filename1, "w");
+    TEST_ASSERT_NOT_NULL(f);
+    TEST_ASSERT_EQUAL(12, fwrite("Hello World\n", 1, 12, f));
+    TEST_ASSERT_EQUAL(0, fclose(f));
+
+    /* Create tasks similar to what shell does; each uses its own files. */
+    volatile int done_count = 0;
+    deadlock_regression_task_arg_t arg1 = { .id = 1, .done_count = &done_count };
+    deadlock_regression_task_arg_t arg2 = { .id = 2, .done_count = &done_count };
+    TaskHandle_t task1 = NULL, task2 = NULL;
+    TEST_ASSERT_EQUAL(pdPASS, xTaskCreate(dummy_task, "task1", 4096, &arg1, 5, &task1));
+    TEST_ASSERT_EQUAL(pdPASS, xTaskCreate(dummy_task, "task2", 4096, &arg2, 4, &task2));
+
+    /* Wait until both tasks finished their filesystem work (bounded). */
+    for (int i = 0; i < 200 && __atomic_load_n(&done_count, __ATOMIC_SEQ_CST) < 2; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    TEST_ASSERT_EQUAL_INT(2, __atomic_load_n(&done_count, __ATOMIC_SEQ_CST));
+
+    /* Filesystem operations after task activity should not hang. */
+    const char *filename2 = littlefs_base_path "/after.txt";
+    f = fopen(filename2, "w");
+    TEST_ASSERT_NOT_NULL(f);
+    TEST_ASSERT_EQUAL(5, fwrite("test\n", 1, 5, f));
+    TEST_ASSERT_EQUAL(0, fclose(f));
+
+    int fd = open(littlefs_base_path "/posix.txt", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    TEST_ASSERT_GREATER_OR_EQUAL(0, fd);
+    TEST_ASSERT_EQUAL(4, write(fd, "data", 4));
+    TEST_ASSERT_EQUAL(0, close(fd));
+
+    for (int i = 0; i < 5; i++) {
+        char name[64];
+        snprintf(name, sizeof(name), littlefs_base_path "/repeat%d.txt", i);
+        f = fopen(name, "w");
+        TEST_ASSERT_NOT_NULL(f);
+        fprintf(f, "data%d", i);
+        TEST_ASSERT_EQUAL(0, fclose(f));
+    }
+
+    /* Truncate paths must not deadlock with non-recursive fs locks. */
+    {
+        const char *trunc_name = littlefs_base_path "/trunc.txt";
+        FILE *tf = fopen(trunc_name, "w");
+        TEST_ASSERT_NOT_NULL(tf);
+        TEST_ASSERT_TRUE(fputs("0123456789", tf) != EOF);
+        TEST_ASSERT_EQUAL(0, fclose(tf));
+
+        TEST_ASSERT_EQUAL(0, truncate(trunc_name, 4));
+
+        int tfd = open(trunc_name, O_RDWR);
+        TEST_ASSERT_GREATER_OR_EQUAL(0, tfd);
+        TEST_ASSERT_EQUAL(0, ftruncate(tfd, 2));
+        TEST_ASSERT_EQUAL(0, close(tfd));
+    }
+
     test_teardown();
 }
 
